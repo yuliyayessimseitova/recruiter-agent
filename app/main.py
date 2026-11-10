@@ -8,6 +8,8 @@ app = FastAPI()
 TOKEN = os.environ.get("RECRUITER_BOT_TOKEN", "")
 SECRET = hashlib.sha256(("wh" + TOKEN).encode()).hexdigest()[:32]
 CHANNEL = os.environ.get("TEST_CHANNEL_ID", "")
+BOT = {"username": os.environ.get("BOT_USERNAME", "")}
+VACANCIES: dict[str, str] = {}
 DRAFTS: dict[int, str] = {}  # демо: черновики в памяти
 WAIT: set[int] = set()
 
@@ -19,6 +21,9 @@ KB = {"inline_keyboard": [[{"text": "Опубликовать", "callback_data":
 
 @app.on_event("startup")
 async def startup():
+    if TOKEN and not BOT["username"]:
+        me = await tg.call("getMe")
+        BOT["username"] = me.get("result", {}).get("username", "")
     base = os.environ.get("RENDER_EXTERNAL_URL")
     if base and TOKEN:
         await tg.call("setWebhook", url=f"{base}/webhook/{SECRET}",
@@ -39,11 +44,18 @@ async def webhook(secret: str, req: Request):
         q = u["callback_query"]
         chat = q["message"]["chat"]["id"]
         await tg.call("answerCallbackQuery", callback_query_id=q["id"])
-        if q["data"] == "pub" and chat in DRAFTS:
+        if q["data"] == "consent":
+            await tg.call("sendMessage", chat_id=chat, text="Спасибо! Первый вопрос: как вас зовут?")
+        elif q["data"] == "pub" and chat in DRAFTS:
             if not CHANNEL:
                 await tg.call("sendMessage", chat_id=chat, text="Не задан TEST_CHANNEL_ID.")
             else:
-                r = await tg.call("sendMessage", chat_id=CHANNEL, text=DRAFTS.pop(chat))
+                d = DRAFTS.pop(chat)
+                vid = hashlib.sha1(d.encode()).hexdigest()[:8]
+                VACANCIES[vid] = d.split("\n")[0][:80]
+                link = f"https://t.me/{BOT['username']}?start=vac_{vid}"
+                r = await tg.call("sendMessage", chat_id=CHANNEL, text=d,
+                                  reply_markup={"inline_keyboard": [[{"text": "Откликнуться", "url": link}]]})
                 await tg.call("sendMessage", chat_id=chat,
                               text="Опубликовано." if r.get("ok") else f"Ошибка публикации: {r.get('description')}")
         else:
@@ -54,7 +66,16 @@ async def webhook(secret: str, req: Request):
     if not m or "text" not in m:
         return {"ok": True}
     chat, text = m["chat"]["id"], m["text"]
-    if text.startswith("/start"):
+    if text.startswith("/start vac_"):
+        vid = text.split("vac_", 1)[1].strip()
+        title = VACANCIES.get(vid, "вакансию")
+        await tg.call("sendMessage", chat_id=chat, text=(
+            f"Здравствуйте! Это бот Smart HR Group. Вы откликаетесь на: {title}.\n\n"
+            "Я задам несколько вопросов для первичной оценки. Для этого нужно ваше согласие на обработку "
+            "персональных данных (ФИО, контакты, опыт работы) для целей подбора. Данные можно удалить по запросу.\n\n"
+            "Нажмите «Согласен», чтобы продолжить."),
+            reply_markup={"inline_keyboard": [[{"text": "Согласен", "callback_data": "consent"}]]})
+    elif text.startswith("/start"):
         await tg.call("sendMessage", chat_id=chat, text=HELP)
     elif text.startswith("/new"):
         WAIT.add(chat)
