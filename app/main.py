@@ -50,14 +50,16 @@ async def webhook(secret: str, req: Request):
             if not CHANNEL:
                 await tg.call("sendMessage", chat_id=chat, text="Не задан TEST_CHANNEL_ID.")
             else:
-                d = DRAFTS.pop(chat)
+                d = DRAFTS[chat]
                 vid = hashlib.sha1(d.encode()).hexdigest()[:8]
                 VACANCIES[vid] = d.split("\n")[0][:80]
                 link = f"https://t.me/{BOT['username']}?start=vac_{vid}"
-                r = await tg.call("sendMessage", chat_id=CHANNEL, text=d,
+                r = await tg.call("sendMessage", chat_id=CHANNEL, text=d + f"\n\n👉 Откликнуться: {link}",
                                   reply_markup={"inline_keyboard": [[{"text": "Откликнуться", "url": link}]]})
                 await tg.call("sendMessage", chat_id=chat,
-                              text="Опубликовано." if r.get("ok") else f"Ошибка публикации: {r.get('description')}")
+                              text="Опубликовано." if r.get("ok") else f"Ошибка публикации: {r.get('description')}. Черновик сохранён, нажмите «Опубликовать» ещё раз после исправления.")
+                if r.get("ok"):
+                    DRAFTS.pop(chat, None)
         else:
             DRAFTS.pop(chat, None)
             await tg.call("sendMessage", chat_id=chat, text="Отменено.")
@@ -89,5 +91,5 @@ async def webhook(secret: str, req: Request):
             await tg.call("sendMessage", chat_id=chat, text=f"Ошибка ИИ: {type(e).__name__}")
             return {"ok": True}
         DRAFTS[chat] = d
-        await tg.call("sendMessage", chat_id=chat, text=d + "\n\nОпубликовать в тестовый канал?", reply_markup=KB)
+        await tg.call("sendMessage", chat_id=chat, text=d + f"\n\n👉 Откликнуться: https://t.me/{BOT['username']}?start=vac_…\n\nОпубликовать в тестовый канал?", reply_markup=KB)
     return {"ok": True}
